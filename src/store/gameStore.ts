@@ -35,6 +35,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   bombFlash: 0,
   bossHpMax: 0,
   bossHpNow: 0,
+  waveAdvancing: 0,
 
   startGame: () => {
     set({
@@ -51,12 +52,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
       bombFlash: 0,
       bossHpMax: 0,
       bossHpNow: 0,
+      waveAdvancing: 0,
     });
     get().startStage(0);
   },
 
   startStage: (stage: number) => {
-    set({ stage, wave: 0, enemies: [], bullets: [], powerUps: [], particles: [], bombFlash: 0 });
+    set({ stage, wave: 0, enemies: [], bullets: [], powerUps: [], particles: [], bombFlash: 0, waveAdvancing: 0 });
     get().nextWave();
   },
 
@@ -177,6 +179,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const next = { ...s };
     next.frameCount = s.frameCount + 1;
     if (next.bombFlash > 0) next.bombFlash--;
+    if (next.waveAdvancing > 0) next.waveAdvancing--;
 
     const keys = s.keys;
 
@@ -263,15 +266,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         e.y += e.speedY;
         e.x += e.specialState === 0 ? 3 : -3;
       } else if (e.def.kind === 'sniper') {
-        if (e.y < 30 + Math.random() * 40) {
-          e.speedY = 0.3 + Math.random() * 0.3;
+        if (e.y < 40) {
+          e.speedY = 0.5;
         } else {
           e.speedY = 0;
-          e.speedX = 0;
         }
         e.y += e.speedY;
-        e.x += e.speedX;
-        e.specialTimer--;
         e.shotTimer--;
         if (e.shotTimer <= 0 && next.bombFlash <= 0) {
           e.shotTimer = 50;
@@ -311,6 +311,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // ---- 碰撞: 玩家子弹 vs 敌机 ----
     const particles: Particle[] = [...s.particles];
+    let killScore = 0;
+    const newPowerUps: PowerUp[] = [];
     for (let i = liveBullets.length - 1; i >= 0; i--) {
       const b = liveBullets[i];
       if (!b.fromPlayer) continue;
@@ -321,17 +323,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
           if (enemies[j].hp <= 0) {
             const dead = enemies[j];
             const bossKill = dead.def.kind === 'boss';
+            killScore += dead.def.score;
             particles.push(...spawnExplosion(dead.x + dead.def.width / 2, dead.y + dead.def.height / 2, bossKill ? 20 : 8));
             if (bossKill) {
-              const drops = s.powerUps;
-              drops.push({ id: next.frameCount * 500 + 1, kind: 'bomb', x: dead.x + dead.def.width / 2 - 6, y: dead.y + dead.def.height / 2, vy: 1 });
-              drops.push({ id: next.frameCount * 500 + 2, kind: 'shield', x: dead.x + dead.def.width / 2 + 6, y: dead.y + dead.def.height / 2, vy: 1 });
+              newPowerUps.push({ id: next.frameCount * 500 + 1, kind: 'bomb', x: dead.x + dead.def.width / 2 - 6, y: dead.y + dead.def.height / 2, vy: 1 });
+              newPowerUps.push({ id: next.frameCount * 500 + 2, kind: 'shield', x: dead.x + dead.def.width / 2 + 6, y: dead.y + dead.def.height / 2, vy: 1 });
             } else if (Math.random() < 0.05) {
-              const drops = s.powerUps;
-              drops.push({ id: next.frameCount * 500 + dead.id, kind: 'bomb', x: dead.x + dead.def.width / 2, y: dead.y + dead.def.height / 2, vy: 1.5 });
+              newPowerUps.push({ id: next.frameCount * 500 + dead.id, kind: 'bomb', x: dead.x + dead.def.width / 2, y: dead.y + dead.def.height / 2, vy: 1.5 });
             } else if (Math.random() < 0.03) {
-              const drops = s.powerUps;
-              drops.push({ id: next.frameCount * 500 + dead.id, kind: 'shield', x: dead.x + dead.def.width / 2, y: dead.y + dead.def.height / 2, vy: 1.5 });
+              newPowerUps.push({ id: next.frameCount * 500 + dead.id, kind: 'shield', x: dead.x + dead.def.width / 2, y: dead.y + dead.def.height / 2, vy: 1.5 });
             }
             enemies.splice(j, 1);
           }
@@ -403,7 +403,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     // ---- 道具移动与拾取 ----
-    let powerUps = [...s.powerUps];
+    let powerUps = [...s.powerUps, ...newPowerUps];
     for (let i = powerUps.length - 1; i >= 0; i--) {
       powerUps[i] = { ...powerUps[i], y: powerUps[i].y + powerUps[i].vy };
       if (powerUps[i].y > GAME.HEIGHT + 10) {
@@ -418,7 +418,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     }
 
-    let newScore = s.score;
+    let newScore = s.score + killScore;
 
     // ---- 粒子衰减 ----
     const liveParticles: Particle[] = [];
@@ -431,7 +431,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     // ---- 检查波次清空 ----
     const bossAlive = enemies.find(e => e.def.kind === 'boss');
     const bossHpNow = bossAlive?.hp ?? 0;
-    if (enemies.length === 0 && next.bombFlash <= 0) {
+    if (enemies.length === 0 && next.bombFlash <= 0 && s.waveAdvancing <= 0) {
       if (s.wave >= 4) {
         set({ score: newScore, player, enemies: [], bullets: [], powerUps, particles: liveParticles, bossHpNow: 0 });
         if (s.stage >= 2) {
@@ -439,6 +439,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         } else {
           setTimeout(() => get().stageClear(), 500);
         }
+        return;
+      } else {
+        set({ score: newScore, player, enemies: [], bullets: [], powerUps, particles: liveParticles, wave: s.wave + 1, waveAdvancing: 50, bossHpNow: 0 });
+        setTimeout(() => get().nextWave(), 800);
         return;
       }
     }

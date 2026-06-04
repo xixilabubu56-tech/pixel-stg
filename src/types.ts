@@ -118,6 +118,7 @@ export interface GameState {
   bombFlash: number;
   bossHpMax: number;
   bossHpNow: number;
+  waveAdvancing: number;
 }
 
 // ---- 动作类型 (Zustand actions) ----
